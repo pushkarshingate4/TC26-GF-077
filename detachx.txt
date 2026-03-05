@@ -1,0 +1,195 @@
+#include "BluetoothSerial.h"
+BluetoothSerial SerialBT;
+
+/* ========= MOTOR DRIVER ========= */
+
+#define IN1 14
+#define IN2 27
+#define IN3 26
+#define IN4 25
+#define ENA 33
+#define ENB 32
+
+/* ========= ULTRASONIC ========= */
+
+#define TRIG 5
+#define ECHO 18
+
+/* ========= DUAL IR ========= */
+
+#define IR_LEFT 19
+#define IR_RIGHT 21
+
+/* ========= PWM SETTINGS ========= */
+
+#define PWM_FREQ 1000
+#define PWM_RES 8
+#define PWM_CH_A 0
+#define PWM_CH_B 1
+
+bool ultrasonicConnected = false;
+
+/* ================= SETUP ================= */
+
+void setup() {
+
+  Serial.begin(115200);
+  SerialBT.begin("ESP32_CAR");
+
+  pinMode(IN1,OUTPUT);
+  pinMode(IN2,OUTPUT);
+  pinMode(IN3,OUTPUT);
+  pinMode(IN4,OUTPUT);
+
+  stopMotors();   // Important: prevent auto movement
+
+  ledcSetup(PWM_CH_A, PWM_FREQ, PWM_RES);
+  ledcSetup(PWM_CH_B, PWM_FREQ, PWM_RES);
+
+  ledcAttachPin(ENA, PWM_CH_A);
+  ledcAttachPin(ENB, PWM_CH_B);
+
+  ledcWrite(PWM_CH_A, 180);   // speed (0–255)
+  ledcWrite(PWM_CH_B, 180);
+
+  pinMode(TRIG,OUTPUT);
+  pinMode(ECHO,INPUT);
+
+  pinMode(IR_LEFT,INPUT_PULLUP);
+  pinMode(IR_RIGHT,INPUT_PULLUP);
+}
+
+/* ================= LOOP ================= */
+
+void loop() {
+
+  detectUltrasonic();
+
+  if(ultrasonicConnected){
+    ultrasonicMode();
+  }
+  else if(irAvailable()){
+    lineFollower();
+  }
+  else{
+    bluetoothMode();
+  }
+}
+
+/* ================= DETECTION ================= */
+
+void detectUltrasonic(){
+
+  digitalWrite(TRIG,LOW);
+  delayMicroseconds(2);
+  digitalWrite(TRIG,HIGH);
+  delayMicroseconds(10);
+  digitalWrite(TRIG,LOW);
+
+  long d = pulseIn(ECHO,HIGH,20000);
+  ultrasonicConnected = (d > 0);
+}
+
+bool irAvailable(){
+  return true;   // assumed connected if plugged
+}
+
+/* ================= MOTOR FUNCTIONS ================= */
+
+void forward(){
+  digitalWrite(IN1,HIGH);
+  digitalWrite(IN2,LOW);
+  digitalWrite(IN3,HIGH);
+  digitalWrite(IN4,LOW);
+}
+
+void backward(){
+  digitalWrite(IN1,LOW);
+  digitalWrite(IN2,HIGH);
+  digitalWrite(IN3,LOW);
+  digitalWrite(IN4,HIGH);
+}
+
+void left(){
+  digitalWrite(IN1,LOW);
+  digitalWrite(IN2,HIGH);
+  digitalWrite(IN3,HIGH);
+  digitalWrite(IN4,LOW);
+}
+
+void right(){
+  digitalWrite(IN1,HIGH);
+  digitalWrite(IN2,LOW);
+  digitalWrite(IN3,LOW);
+  digitalWrite(IN4,HIGH);
+}
+
+void stopMotors(){
+  digitalWrite(IN1,LOW);
+  digitalWrite(IN2,LOW);
+  digitalWrite(IN3,LOW);
+  digitalWrite(IN4,LOW);
+}
+
+/* ================= ULTRASONIC MODE ================= */
+
+void ultrasonicMode(){
+
+  long duration;
+  int distance;
+
+  digitalWrite(TRIG,LOW);
+  delayMicroseconds(2);
+  digitalWrite(TRIG,HIGH);
+  delayMicroseconds(10);
+  digitalWrite(TRIG,LOW);
+
+  duration = pulseIn(ECHO,HIGH);
+  distance = duration * 0.034 / 2;
+
+  if(distance < 20){
+    stopMotors();
+    delay(200);
+    right();
+    delay(300);
+  }
+  else{
+    forward();
+  }
+}
+
+/* ================= LINE FOLLOWER ================= */
+
+void lineFollower(){
+
+  int L = digitalRead(IR_LEFT);
+  int R = digitalRead(IR_RIGHT);
+
+  if(L==LOW && R==LOW){
+    forward();
+  }
+  else if(L==LOW && R==HIGH){
+    left();
+  }
+  else if(L==HIGH && R==LOW){
+    right();
+  }
+  else{
+    stopMotors();
+  }
+}
+
+/* ================= BLUETOOTH MODE ================= */
+
+void bluetoothMode(){
+
+  if(SerialBT.available()){
+    char c = SerialBT.read();
+
+    if(c=='F') forward();
+    if(c=='B') backward();
+    if(c=='L') left();
+    if(c=='R') right();
+    if(c=='S') stopMotors();
+  }
+}
